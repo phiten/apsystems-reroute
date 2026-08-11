@@ -1,0 +1,9 @@
+#!/bin/sh
+# Records every call and answers -S/-L from files the test points it at.
+echo "$*" >> "$STUB_LOG"
+case "$*" in
+    *"-S EZHI_REROUTE"*) cat "${STUB_CHAIN:-/dev/null}" ;;
+    *"-S PREROUTING"*)   cat "${STUB_PREROUTING:-/dev/null}" ;;
+    *"-L EZHI_REROUTE"*) cat "${STUB_COUNTERS:-/dev/null}" ;;
+esac
+exit "${STUB_RC:-0}"

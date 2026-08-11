@@ -1,0 +1,8 @@
+#!/bin/sh
+# Answers like an inverter for the address in $STUB_EZHI_IP, and for nothing else.
+for a in "$@"; do
+    case "$a" in
+        *"//$STUB_EZHI_IP/getDeviceInfo") echo '{"deviceId":"D00000000000","devVer":"x"}'; exit 0 ;;
+    esac
+done
+exit 1
