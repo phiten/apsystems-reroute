@@ -1,0 +1,37 @@
+# A Home Assistant switch that toggles the FRITZ!Box static route over TR-064.
+#
+#   on  = route active   = the inverter talks to your broker (local_mqtt works)
+#   off = route inactive = the inverter talks to the vendor cloud (the app works)
+#
+# Why you might want this: with the DNAT mechanism the switch lives in your
+# router, and most people cannot reach their router from outside their home. This
+# puts it in Home Assistant. It is also its own escape hatch - whatever state it
+# creates, it can undo remotely.
+#
+# The price for "off": your local_mqtt transport then points at a broker with no
+# device on it, so the integration's control entities go unavailable until you
+# switch back. For a longer stay on the cloud, change the control transport in the
+# integration instead.
+#
+# Setup:
+#   1. Copy fritz_route.py and fritz_route.example.json to /config/scripts/ezhi/
+#   2. Rename the example to fritz_route.json, fill it in, chmod 600
+#   3. Check it read-only first:  python3 /config/scripts/ezhi/fritz_route.py state
+#      It must print 1 or 0. If authentication fails here, stop - a write would
+#      be blind.
+#   4. Add this file to your packages/ directory and restart Home Assistant
+#
+# The state is read back from the box on every poll rather than assumed, so the
+# switch shows what the router does, not what Home Assistant last asked for.
+
+command_line:
+  - switch:
+      name: EZHI local control
+      unique_id: ezhi_reroute_route
+      command_on: "python3 /config/scripts/ezhi/fritz_route.py on"
+      command_off: "python3 /config/scripts/ezhi/fritz_route.py off"
+      command_state: "python3 /config/scripts/ezhi/fritz_route.py state"
+      value_template: "{{ value == '1' }}"
+      # Digest auth plus two SOAP round trips; the default 15 s is tight.
+      command_timeout: 20
+      scan_interval: 60

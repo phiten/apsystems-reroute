@@ -1,0 +1,12 @@
+{
+  "host": "192.0.2.1",
+  "user": "homeassistant",
+  "password": "CHANGE ME",
+
+  "_comment": "The four fields below identify the route. They must match what you entered in the FRITZ!Box exactly - the box has no route names, it looks a route up by these values. dest is the vendor address the add-on log printed.",
+
+  "dest": "198.51.100.7",
+  "dest_mask": "255.255.255.255",
+  "source": "0.0.0.0",
+  "source_mask": "0.0.0.0"
+}
