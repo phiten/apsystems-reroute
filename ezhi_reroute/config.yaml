@@ -1,0 +1,46 @@
+name: "EZHI Reroute"
+version: "1.0.0"
+slug: "ezhi_reroute"
+description: "Redirects the APsystems EZHI inverter's MQTT connection to a broker you control."
+url: "https://github.com/Glenbeulah/ezhi-reroute"
+# aarch64 only, and that is not laziness. The iptables compatibility this add-on
+# depends on (container 1.8.13 nf_tables against the host's 1.8.11 nf_tables) was
+# verified on an aarch64 HAOS host. On an amd64 host running the legacy backend,
+# the container would write into the nf_tables view that the host does not
+# consult - and the redirect would silently not happen. Shipping an arch nobody
+# has built and run attracts exactly the users it fails for. See DOCS.md.
+arch:
+  - aarch64
+init: false
+# host_network + NET_ADMIN are mandatory: without the host network namespace the
+# container would write its iptables rule into its own netns, where it does
+# nothing at all.
+host_network: true
+privileged:
+  - NET_ADMIN
+# share:rw for the state file that Home Assistant reads.
+map:
+  - share:rw
+# boot: auto is mandatory rather than a preference. The host has -P FORWARD DROP.
+# If it reboots while the route in your router is active and this add-on does not
+# come up with it, the inverter's packets fall into the forward path and are
+# dropped - the device then reaches neither your broker nor the vendor.
+boot: auto
+startup: services
+options:
+  source_ip: ""
+  dns_name: "data.mqtt.apsystemsema.com"
+  vendor_ip: ""
+  broker_ip: ""
+  port: 9005
+  check_interval: 60
+# match() rather than str: $ARGS is expanded unquoted in run.sh (it is an
+# argument vector). A value containing spaces would split into extra iptables
+# arguments. The empty alternative is what enables auto-detection.
+schema:
+  source_ip: 'match(^$|^[0-9]{1,3}(\.[0-9]{1,3}){3}$)'
+  dns_name: str
+  vendor_ip: 'match(^$|^[0-9]{1,3}(\.[0-9]{1,3}){3}$)'
+  broker_ip: 'match(^$|^[0-9]{1,3}(\.[0-9]{1,3}){3}$)'
+  port: port
+  check_interval: int(10,3600)

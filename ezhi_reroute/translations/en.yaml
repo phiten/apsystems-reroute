@@ -1,0 +1,29 @@
+configuration:
+  source_ip:
+    name: Inverter IP address
+    description: >-
+      Leave empty to detect it automatically. The rule is bound to this address,
+      so only this one device is redirected - the vendor app on your phone keeps
+      working while it is on your home network.
+  dns_name:
+    name: Vendor MQTT hostname
+    description: >-
+      The name the inverter connects to. It is resolved on every check, so a
+      change on the vendor's side is picked up without reconfiguring anything.
+  vendor_ip:
+    name: Vendor IP address (override)
+    description: >-
+      Leave empty unless you have a reason. Empty means the hostname above is
+      resolved instead, which is what makes this work outside Europe - the vendor
+      endpoint sits behind a regional load balancer.
+  broker_ip:
+    name: Broker IP address
+    description: >-
+      Leave empty to use this host's own address, which is right when your
+      Mosquitto runs on the same machine.
+  port:
+    name: Port
+    description: The vendor's MQTT port. 9005 unless you know otherwise.
+  check_interval:
+    name: Check interval
+    description: Seconds between two checks that the rules are still in place.

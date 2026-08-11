@@ -1,0 +1,31 @@
+configuration:
+  source_ip:
+    name: IP-Adresse des Wechselrichters
+    description: >-
+      Leer lassen für automatische Erkennung. Die Regel ist an diese Adresse
+      gebunden, es wird also nur dieses eine Gerät umgeleitet — die Hersteller-App
+      auf dem Handy funktioniert im Heimnetz weiter.
+  dns_name:
+    name: MQTT-Hostname des Herstellers
+    description: >-
+      Der Name, zu dem der Wechselrichter verbindet. Er wird bei jeder Prüfung neu
+      aufgelöst, eine Änderung beim Hersteller wird also ohne Umkonfigurieren
+      übernommen.
+  vendor_ip:
+    name: IP-Adresse des Herstellers (Übersteuerung)
+    description: >-
+      Leer lassen, außer es gibt einen Grund. Leer heißt, der Hostname oben wird
+      aufgelöst — genau das lässt dieses Add-on auch außerhalb Europas
+      funktionieren, denn der Hersteller-Endpunkt hängt hinter einem regionalen
+      Load Balancer.
+  broker_ip:
+    name: IP-Adresse des Brokers
+    description: >-
+      Leer lassen, um die eigene Adresse dieses Hosts zu verwenden — richtig,
+      wenn Mosquitto auf demselben Gerät läuft.
+  port:
+    name: Port
+    description: Der MQTT-Port des Herstellers. 9005, sofern nicht anders bekannt.
+  check_interval:
+    name: Prüfintervall
+    description: Sekunden zwischen zwei Prüfungen, ob die Regeln noch stehen.
