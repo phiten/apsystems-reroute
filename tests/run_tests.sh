@@ -137,5 +137,41 @@ STATE_FILE="$WORK/state.json"
 write_state ok "" 0
 check "leere Adressmenge ergibt leeres Array" "0" "$(jq '.addresses | length' "$WORK/state.json")"
 
+# --- Task 8: dropping the tracked connections after a rule change ---------
+
+setup
+drop_conntrack
+check "conntrack wird auf Quelle und Port eingegrenzt" "1" \
+  "$(grep -c '^conntrack -D -s 192.0.2.10 -p tcp --dport 9005$' "$STUB_LOG")"
+
+setup
+check "nichts zu loeschen ist kein Fehler" "0" \
+  "$( (STUB_CT_RC=1; export STUB_CT_RC; drop_conntrack; echo $?) )"
+
+setup
+SOURCE_IP=""
+drop_conntrack
+check "ohne Quelladresse wird nichts geloescht" "0" "$(grep -c '^conntrack' "$STUB_LOG")"
+
+setup
+check "fehlendes conntrack ist kein Daemon-Tod" "0" \
+  "$( (PATH="$WORK"; export PATH; drop_conntrack >/dev/null 2>&1; echo $?) )"
+
+setup
+cat > "$WORK/chain" <<'EOF'
+-N EZHI_REROUTE
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+EOF
+STUB_CHAIN="$WORK/chain"; VENDOR_IP=203.0.113.4
+ensure
+check "unveraenderte Adressmenge laesst die Verbindung in Ruhe" "0" \
+  "$(grep -c '^conntrack' "$STUB_LOG")"
+
+setup
+STUB_CHAIN="$WORK/chain2"; : > "$WORK/chain2"; VENDOR_IP=203.0.113.9
+ensure
+check "Adresswechsel loescht den alten Verbindungszustand" "1" \
+  "$(grep -c '^conntrack -D' "$STUB_LOG")"
+
 printf '\n%d bestanden, %d fehlgeschlagen\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

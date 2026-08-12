@@ -102,6 +102,32 @@ chain_addresses() {
 # Called ONLY when the address set actually changed: every flush resets the
 # packet counters, and those carry the one diagnostic that tells a user their
 # router is not forwarding anything here.
+drop_conntrack() {
+    # The nat table only ever sees the FIRST packet of a connection; every
+    # packet after it follows the conntrack entry made back then. A rule change
+    # therefore does not move a connection that is already up - the inverter
+    # keeps talking through the translation it got under the old rules, while
+    # the fresh rule sits at zero packets and everything looks fine. Dropping
+    # the tracked connection forces the next packet back through the nat table,
+    # which is what makes the packet counter mean what this add-on says it
+    # means. Measured 2026-08-13: the counter survives a container restart
+    # untouched, because ensure_chain does not flush - only a rule change does.
+    #
+    # Scoped to this inverter and this port. The HAOS host runs other DNAT of
+    # its own (Tailscale), and a blanket flush would drop connections that have
+    # nothing to do with us.
+    [ -n "$SOURCE_IP" ] || return 0
+    if ! command -v conntrack >/dev/null 2>&1; then
+        log "WARN conntrack is missing - the inverter keeps its existing"
+        log "     connection until it reconnects on its own, so the packet"
+        log "     counter can read 0 for a while after a rule change."
+        return 0
+    fi
+    # Exit code 1 means "nothing matched", which is the ordinary case: the
+    # inverter may not have a connection up. Under set -e that would be fatal.
+    conntrack -D -s "$SOURCE_IP" -p tcp --dport "$PORT" || true
+}
+
 install_rules() {
     iptables -t nat -F "$CHAIN"
     for ip in $1; do
@@ -180,6 +206,7 @@ ensure() {
     [ "$_want" = "$_have" ] && return 0
     log "installing rules for ${_want}(was: ${_have:-none})"
     install_rules "$(resolve_vendor)"
+    drop_conntrack
 }
 
 # On SIGTERM we exit, but we deliberately do NOT remove the rule.

@@ -105,6 +105,13 @@ Every check writes `/share/ezhi_reroute.json`:
 only the first packet of each connection, and the inverter holds one long-lived
 MQTT connection. So `0` is the signal, not "it stopped rising".
 
+The counter survives a restart of this add-on untouched — the chain is only
+flushed when the vendor's address set actually changes. When that happens, the
+add-on also drops the inverter's tracked connection, so the device reconnects
+through the new rules instead of riding out the translation it got under the
+old ones. Without that, a fresh rule could sit at `0` while everything worked,
+which would make `0` mean two different things.
+
 `ts` comes from busybox and carries no colon in its offset (`+0100`), which is
 valid ISO 8601 but not what Home Assistant's `device_class: timestamp` accepts —
 treat it as a string, or reformat it.

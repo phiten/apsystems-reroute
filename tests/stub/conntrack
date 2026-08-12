@@ -1,0 +1,4 @@
+#!/bin/sh
+# Records the call; the real one deletes tracked connections.
+echo "conntrack $*" >> "$STUB_LOG"
+exit "${STUB_CT_RC:-0}"

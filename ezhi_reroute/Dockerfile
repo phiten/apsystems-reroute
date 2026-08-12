@@ -17,7 +17,10 @@ LABEL io.hass.arch="aarch64"
 # musl-utils  -> getent, to resolve the vendor endpoint (30 KB rather than the
 #                2 MB of bind-tools).
 # tzdata      -> without it, date ignores the TZ the Supervisor sets and logs UTC.
-RUN apk add --no-cache iptables jq musl-utils tzdata
+# conntrack-  -> drop the tracked connections after a rule change, so the
+#   tools         inverter re-enters the nat table instead of riding out its old
+#                 translation (see drop_conntrack in run.sh).
+RUN apk add --no-cache iptables jq musl-utils tzdata conntrack-tools
 
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
