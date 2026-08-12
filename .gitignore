@@ -1,2 +1,3 @@
 *.tmp
 fritz_route.json
+.DS_Store
