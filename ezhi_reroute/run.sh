@@ -182,17 +182,29 @@ ensure() {
     install_rules "$(resolve_vendor)"
 }
 
-# There is deliberately NO cleanup trap. The rule stays when the add-on stops.
+# On SIGTERM we exit, but we deliberately do NOT remove the rule.
 #
-# Why: the rule only matches `-s <inverter> -d <vendor>:<port>`. With the route in
-# your router switched off, those packets never reach this host - the rule is
-# unreachable. With it switched on, you want the rule. A leftover rule can, by
-# construction, only take effect when it should.
+# Why the rule stays: it only matches `-s <inverter> -d <vendor>:<port>`. With the
+# route in your router switched off, those packets never reach this host - the
+# rule is unreachable. With it switched on, you want the rule. A leftover rule
+# can, by construction, only take effect when it should.
 #
-# An earlier version removed it on SIGTERM. That turned every clean stop into a
+# An earlier version removed it here. That turned every clean stop into a
 # blackhole: the host has -P FORWARD DROP, so the packets vanished. A hard crash,
 # which never ran the trap, left the rule in place and the device kept working -
 # the failure modes were the wrong way round.
+#
+# Why there is a trap at all, rather than none: without one the shell sits in
+# `wait` and never acts on SIGTERM, so Docker kills it after its ten-second grace
+# period and the Supervisor reports the add-on as `error` instead of `stopped`.
+# Measured 2026-08-12: "Stopping" 20:21:37, "Cleaning" 20:21:47 - exactly the
+# grace period, every single stop.
+on_term() {
+    log "stopping - the rule stays; the route in your router is the switch"
+    exit 0
+}
+trap on_term INT TERM
+
 main() {
     load_options
 
