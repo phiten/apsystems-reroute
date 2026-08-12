@@ -10,7 +10,7 @@ firmware in Ghidra. The vendor app's entire command vocabulary has no field for 
 server, broker or host. So the redirect has to happen in your network.
 
 Meant to be used with the
-[apsystems_ezhi_local](https://github.com/Glenbeulah/EZHI) integration set to the
+[apsystems_ezhi_local](https://github.com/kamilkosek/EZHI) integration set to the
 `local_mqtt` control transport.
 
 ## What this add-on does, and what it does not

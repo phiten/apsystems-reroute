@@ -88,7 +88,9 @@ def routes(conf: dict) -> int:
                 '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" '
                 's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>'
                 f'<u:GetGenericForwardingEntry xmlns:u="{SERVICE}">'
-                f'<NewForwardingEntryIndex>{index}</NewForwardingEntryIndex>'
+                # NewForwardingIndex, not NewForwardingEntryIndex - the box
+                # answers the latter with "402 Invalid Args".
+                f'<NewForwardingIndex>{index}</NewForwardingIndex>'
                 '</u:GetGenericForwardingEntry></s:Body></s:Envelope>')
         reply = _post(conf, "GetGenericForwardingEntry", body)
         dest = field(reply, "NewDestIPAddress")

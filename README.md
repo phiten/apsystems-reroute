@@ -9,7 +9,7 @@ firmware. So the redirect has to happen in your network. This add-on holds the
 is something you add in your router.
 
 Built for use with the
-[apsystems_ezhi_local](https://github.com/Glenbeulah/EZHI) integration on its
+[apsystems_ezhi_local](https://github.com/kamilkosek/EZHI) integration on its
 `local_mqtt` control transport.
 
 ## Install
