@@ -4,7 +4,13 @@ Home Assistant when you are not at home.
 
   fritz_route.py state             prints 1 (route active) or 0
   fritz_route.py on|off            flips the checkbox, prints the resulting state
+  fritz_route.py routes            lists every static route, read-only, in the
+                                   exact shape this file's config wants
   fritz_route.py state --dry-run   prints the request instead of sending it
+
+Start with `routes`. It is read-only and it hands you the four identifying
+fields, which have to match byte for byte and which the web interface does not
+show you.
 
 Why this exists: with the DNAT mechanism the switch lives in your router, and most
 people cannot reach their router from outside their home. This puts the switch in
@@ -54,22 +60,62 @@ def envelope(action: str, conf: dict, enable: bool | None = None) -> str:
             '</s:Body></s:Envelope>')
 
 
+def field(reply: str, tag: str) -> str:
+    """The text of one XML tag, or "" when it is not there."""
+    start = reply.find(f"<{tag}>")
+    if start == -1:
+        return ""
+    return reply[start + len(tag) + 2:reply.find(f"</{tag}>", start)].strip()
+
+
 def parse_enable(reply: str) -> str:
     """1 or 0. A missing entry comes back as a SOAP fault and means "off" - the
     route is not in effect either way, and that is what the switch should show."""
-    start = reply.find("<NewEnable>")
-    if start == -1:
-        return "0"
-    return reply[start + len("<NewEnable>"):reply.find("</NewEnable>", start)].strip()
+    return field(reply, "NewEnable") or "0"
+
+
+def routes(conf: dict) -> int:
+    """Print every static route the box holds, in the shape fritz_route.json
+    wants. Read-only.
+
+    This exists because the four identifying fields have to match the stored
+    route byte for byte, and the web interface never shows you what it stored -
+    it only lets you type a network, a mask and a gateway. Guessing the source
+    fields is the most likely way to end up with a switch that reports `unknown`.
+    """
+    for index in range(32):
+        body = ('<?xml version="1.0"?>'
+                '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" '
+                's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>'
+                f'<u:GetGenericForwardingEntry xmlns:u="{SERVICE}">'
+                f'<NewForwardingEntryIndex>{index}</NewForwardingEntryIndex>'
+                '</u:GetGenericForwardingEntry></s:Body></s:Envelope>')
+        reply = _post(conf, "GetGenericForwardingEntry", body)
+        dest = field(reply, "NewDestIPAddress")
+        if not dest:
+            return index
+        print(json.dumps({
+            "dest": dest,
+            "dest_mask": field(reply, "NewDestSubnetMask"),
+            "source": field(reply, "NewSourceIPAddress"),
+            "source_mask": field(reply, "NewSourceSubnetMask"),
+            "gateway": field(reply, "NewGatewayIPAddress"),
+            "enabled": field(reply, "NewEnable"),
+        }))
+    return 32
 
 
 def call(action: str, conf: dict, enable: bool | None = None,
          dry_run: bool = False) -> str:
     body = envelope(action, conf, enable)
-    url = f"http://{conf['host']}:49000{CONTROL}"
     if dry_run:
+        url = f"http://{conf['host']}:49000{CONTROL}"
         return f"POST {url}\nSoapAction: {soap_action(action)}\n\n{body}"
+    return _post(conf, action, body)
 
+
+def _post(conf: dict, action: str, body: str) -> str:
+    url = f"http://{conf['host']}:49000{CONTROL}"
     manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
     manager.add_password(None, url, conf["user"], conf["password"])
     opener = urllib.request.build_opener(
@@ -122,7 +168,10 @@ def main(argv: list[str]) -> int:
             # Home Assistant should show what the box does, not what we asked for.
             print(parse_enable(call("GetSpecificForwardingEntry", conf)))
         return 0
-    print(f"usage: {args[0]} on|off|state [--dry-run]", file=sys.stderr)
+    if command == "routes":
+        print(f"# {routes(conf)} route(s)", file=sys.stderr)
+        return 0
+    print(f"usage: {args[0]} on|off|state|routes [--dry-run]", file=sys.stderr)
     return 2
 
 

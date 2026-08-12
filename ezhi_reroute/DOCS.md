@@ -64,22 +64,27 @@ Docker sets `-P FORWARD DROP` on the host. So with the **route active** and **no
 rule installed**, the inverter's packets arrive here and are dropped — it then
 reaches neither your broker nor the vendor cloud.
 
-Two things follow:
+A reboot clears the nat table, so that is the situation to guard against:
 
-- **Leave `boot: auto` on.** If the host reboots with the route active and this
-  add-on does not come up with it, you get exactly that state.
-- **When you want to go back to the vendor cloud, remove the route first**, then
-  stop the add-on. The other order creates the blackhole.
+- **Leave `boot: auto` on**, so the rules are back before anything misses them.
+- **Turn on the Watchdog** (below), so a container that dies comes back.
 
-The add-on deliberately **keeps its rule when it stops**. A leftover rule only
-matches traffic from your inverter to the vendor address, so with the route off it
-is unreachable, and with the route on you want it. Removing it on shutdown would
-turn every clean stop into the blackhole above.
+**Stopping the add-on is not one of the ways to get there.** It deliberately keeps
+its rule, so the redirect survives a stop, an update and a crash alike. A leftover
+rule only matches traffic from your inverter to the vendor address: with the route
+off it is unreachable, with the route on you want it. An earlier version removed
+the rule on shutdown, which turned every clean stop into the blackhole above.
+
+**To go back to the vendor cloud, remove the route.** Stopping the add-on will not
+do it — the add-on is not the switch.
 
 ### Turn on the Watchdog
 
 Add-ons run with `RestartPolicy=no`. Without the **Watchdog** toggle on this
-add-on's page, nothing restarts it if its container dies. Turn it on.
+add-on's page, nothing restarts it if its container dies. Turn it on: measured on
+a live host, it caught a killed container (exit code 137) and had it running again
+**178 ms** later — and it does that without this add-on declaring a health
+endpoint, so the toggle is all it takes.
 
 ## Reading the state file
 
