@@ -267,7 +267,7 @@ setup
 BROKER_OPT=""; BROKER_IP=192.0.2.20
 cat > "$WORK/ip" <<'EOF'
 #!/bin/sh
-echo "1.1.1.1 via 10.0.0.1 dev eth0 src 192.0.2.55 uid 0"
+echo "1.1.1.1 via 192.0.2.1 dev eth0 src 192.0.2.55 uid 0"
 EOF
 chmod +x "$WORK/ip"; export PATH="$WORK:$BASE_PATH"
 refresh_broker_ip
@@ -277,7 +277,7 @@ setup
 BROKER_OPT="192.0.2.20"; BROKER_IP=192.0.2.20
 cat > "$WORK/ip" <<'EOF'
 #!/bin/sh
-echo "1.1.1.1 via 10.0.0.1 dev eth0 src 192.0.2.55 uid 0"
+echo "1.1.1.1 via 192.0.2.1 dev eth0 src 192.0.2.55 uid 0"
 EOF
 chmod +x "$WORK/ip"; export PATH="$WORK:$BASE_PATH"
 refresh_broker_ip

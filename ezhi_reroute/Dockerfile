@@ -9,7 +9,7 @@ LABEL io.hass.name="EZHI Reroute"
 LABEL io.hass.description="Redirects the APsystems EZHI inverter's MQTT connection to a local broker"
 # Muss beim Versions-Bump zusammen mit config.yaml angehoben werden -
 # der Supervisor liest config.yaml, dieses LABEL ist nur Metadaten.
-LABEL io.hass.version="1.0.0"
+LABEL io.hass.version="1.1.0"
 LABEL io.hass.type="addon"
 LABEL io.hass.arch="aarch64"
 
