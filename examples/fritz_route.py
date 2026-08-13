@@ -65,16 +65,45 @@ def field(reply: str, tag: str) -> str:
     start = reply.find(f"<{tag}>")
     if start == -1:
         return ""
-    return reply[start + len(tag) + 2:reply.find(f"</{tag}>", start)].strip()
+    end = reply.find(f"</{tag}>", start)
+    if end == -1:
+        # Ohne diesen Check schneidet das Slice bei -1 das letzte Zeichen ab und
+        # liefert stillen Muell statt "".
+        return ""
+    return reply[start + len(tag) + 2:end].strip()
+
+
+# Der eine Fault, der wirklich "aus" bedeutet: die Route steht nicht in der Box,
+# also ist sie auch nicht in Kraft. Alles andere - Auth, falsche Argumente nach
+# einem FRITZ!OS-Update, interne Fehler - ist ein UNBEKANNTER Zustand und darf
+# nicht als "aus" durchgehen: der Schalter zeigte dann "Wechselrichter in der
+# Cloud", obwohl niemand weiss, was die Box tut.
+_NO_SUCH_ENTRY = ("713", "714", "NoSuchEntry", "SpecifiedArrayIndexInvalid")
+
+
+def fault_reason(reply: str) -> str:
+    """errorCode und errorDescription eines SOAP-Faults, oder ""."""
+    if "<s:Fault>" not in reply and "<SOAP-ENV:Fault>" not in reply:
+        return ""
+    code = field(reply, "errorCode")
+    desc = field(reply, "errorDescription") or field(reply, "faultstring")
+    return f"{code} {desc}".strip() or "unspecified SOAP fault"
 
 
 def parse_enable(reply: str) -> str:
-    """1 or 0. A missing entry comes back as a SOAP fault and means "off" - the
-    route is not in effect either way, and that is what the switch should show."""
-    return field(reply, "NewEnable") or "0"
+    """1 or 0 - oder ein harter Abbruch, wenn der Zustand unbekannt ist."""
+    value = field(reply, "NewEnable")
+    if value:
+        return value
+    reason = fault_reason(reply)
+    if reason and not any(k in reason for k in _NO_SUCH_ENTRY):
+        raise SystemExit(f"FRITZ!Box fault, state unknown: {reason}")
+    # Kein Eintrag (oder gar kein Fault, nur ein leeres Feld): die Route ist
+    # nicht in Kraft, und genau das soll der Schalter zeigen.
+    return "0"
 
 
-def routes(conf: dict) -> int:
+def routes(conf: dict, dry_run: bool = False) -> int:
     """Print every static route the box holds, in the shape fritz_route.json
     wants. Read-only.
 
@@ -92,6 +121,9 @@ def routes(conf: dict) -> int:
                 # answers the latter with "402 Invalid Args".
                 f'<NewForwardingIndex>{index}</NewForwardingIndex>'
                 '</u:GetGenericForwardingEntry></s:Body></s:Envelope>')
+        if dry_run:
+            print(body)
+            return 0
         reply = _post(conf, "GetGenericForwardingEntry", body)
         dest = field(reply, "NewDestIPAddress")
         if not dest:
@@ -163,15 +195,18 @@ def main(argv: list[str]) -> int:
         print(reply if dry_run else parse_enable(reply))
         return 0
     if command in ("on", "off"):
-        call("SetForwardingEntryEnable", conf, enable=(command == "on"),
-             dry_run=dry_run)
+        written = call("SetForwardingEntryEnable", conf,
+                       enable=(command == "on"), dry_run=dry_run)
         if not dry_run:
+            reason = fault_reason(written)
+            if reason:
+                raise SystemExit(f"FRITZ!Box refused the write: {reason}")
             # Read the state back rather than echoing the intent: the switch in
             # Home Assistant should show what the box does, not what we asked for.
             print(parse_enable(call("GetSpecificForwardingEntry", conf)))
         return 0
     if command == "routes":
-        print(f"# {routes(conf)} route(s)", file=sys.stderr)
+        print(f"# {routes(conf, dry_run=dry_run)} route(s)", file=sys.stderr)
         return 0
     print(f"usage: {args[0]} on|off|state|routes [--dry-run]", file=sys.stderr)
     return 2

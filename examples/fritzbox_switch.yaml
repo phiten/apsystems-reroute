@@ -33,5 +33,9 @@ command_line:
       command_state: "python3 /config/scripts/ezhi/fritz_route.py state"
       value_template: "{{ value == '1' }}"
       # Digest auth plus two SOAP round trips; the default 15 s is tight.
-      command_timeout: 20
+      # on/off senden ZWEI SOAP-Aufrufe mit je 15 s Timeout, dazu die
+      # Digest-Runde - 20 s reichen dafuer nicht. Bei einem Kill mitten
+      # drin waere der Schaltbefehl schon raus und Home Assistant meldete
+      # trotzdem einen Fehlschlag.
+      command_timeout: 40
       scan_interval: 60

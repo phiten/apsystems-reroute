@@ -235,5 +235,71 @@ STUB_PREROUTING="$WORK/pre"
 drop_legacy_rules
 check "fremde Regel mit laengerem Praefix bleibt" "0" "$(grep -c -- '-D PREROUTING' "$STUB_LOG")"
 
+# --- Task 10: DNS-Rotation und Broker-Adresse -------------------------------
+
+setup
+# M2: rotierende A-Records duerfen keinen Flush ausloesen, sobald die Adresse
+# schon in der Chain steht. Vorher differierte die Menge jede Runde -> Flush
+# plus conntrack-Drop im Takt des Intervalls.
+cat > "$WORK/chain" <<'EOF'
+-N EZHI_REROUTE
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.9/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+EOF
+STUB_CHAIN="$WORK/chain"; VENDOR_IP=203.0.113.9      # heute nur der zweite Record
+ensure
+check "Rotation loest keinen Flush aus" "0" "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
+check "und reisst die Verbindung nicht" "0" "$(grep -c '^conntrack' "$STUB_LOG")"
+
+setup
+STUB_CHAIN="$WORK/chain2"
+cat > "$WORK/chain2" <<'EOF'
+-N EZHI_REROUTE
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+EOF
+VENDOR_IP=203.0.113.9                                 # wirklich neue Adresse
+ensure
+check "eine neue Adresse installiert neu" "1" "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
+check "und behaelt die alte bei" "2" "$(grep -c -- '-A EZHI_REROUTE' "$STUB_LOG")"
+
+setup
+# L1: ohne broker_ip-Option wird die Host-Adresse pro Runde nachgezogen.
+BROKER_OPT=""; BROKER_IP=192.0.2.20
+cat > "$WORK/ip" <<'EOF'
+#!/bin/sh
+echo "1.1.1.1 via 10.0.0.1 dev eth0 src 192.0.2.55 uid 0"
+EOF
+chmod +x "$WORK/ip"; export PATH="$WORK:$BASE_PATH"
+refresh_broker_ip
+check "neue Host-Adresse wird uebernommen" "192.0.2.55" "$BROKER_IP"
+
+setup
+BROKER_OPT="192.0.2.20"; BROKER_IP=192.0.2.20
+cat > "$WORK/ip" <<'EOF'
+#!/bin/sh
+echo "1.1.1.1 via 10.0.0.1 dev eth0 src 192.0.2.55 uid 0"
+EOF
+chmod +x "$WORK/ip"; export PATH="$WORK:$BASE_PATH"
+refresh_broker_ip
+check "gesetzte Option gewinnt gegen die Autoerkennung" "192.0.2.20" "$BROKER_IP"
+
+setup
+BROKER_OPT=""; BROKER_IP=192.0.2.20
+cat > "$WORK/ip" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$WORK/ip"; export PATH="$WORK:$BASE_PATH"
+refresh_broker_ip
+check "leere Antwort behaelt die alte Adresse" "192.0.2.20" "$BROKER_IP"
+
+setup
+# L6: fehlendes check_interval darf keine Hot-Loop erzeugen.
+cat > "$WORK/options.json" <<'EOF'
+{"source_ip":"","vendor_ip":"","broker_ip":"192.0.2.20","dns_name":"x.invalid","port":9005}
+EOF
+EZHI_OPTIONS="$WORK/options.json" load_options >/dev/null 2>&1
+check "fehlendes check_interval faellt auf 60" "60" "$INTERVAL"
+
 printf '\n%d bestanden, %d fehlgeschlagen\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

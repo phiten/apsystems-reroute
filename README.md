@@ -45,5 +45,5 @@ sh tests/run_tests.sh
 python3 tests/test_fritz_route.py
 ```
 
-The shell tests stub `iptables`, `getent` and `wget`, so they touch neither the
+The shell tests stub `iptables`, `conntrack`, `getent` and `wget`, so they touch neither the
 network nor your firewall. They run under both macOS `/bin/sh` and busybox `ash`.

@@ -34,8 +34,28 @@ load_options() {
     DNS_NAME=$(opt dns_name)
     PORT=$(opt port)
     INTERVAL=$(opt check_interval)
+    # Ohne Wert waere das `sleep ""` - und weil der Fehler mit `|| true`
+    # gefangen wird, ergaebe das eine Schleife mit 100 % CPU statt eines Fehlers.
+    case "$INTERVAL" in
+        ''|*[!0-9]*) log "WARN check_interval is '${INTERVAL}', using 60"; INTERVAL=60 ;;
+    esac
 
+    BROKER_OPT="$BROKER_IP"
     [ -n "$BROKER_IP" ] || BROKER_IP=$(host_ip)
+}
+
+refresh_broker_ip() {
+    # Nur wenn der Nutzer nichts vorgegeben hat. Beim Boot kann `ip route get`
+    # noch nichts liefern (Race mit dem Netz), und die Host-Adresse kann sich
+    # per DHCP aendern - beides waere sonst bis zum naechsten Add-on-Neustart
+    # eingefroren. Ein leeres Ergebnis behaelt den alten Wert: lieber die alte
+    # Adresse als ein Ziel ":9005", an dem jedes -A nach dem -F scheitert.
+    [ -n "$BROKER_OPT" ] && return 0
+    _fresh=$(host_ip)
+    if [ -n "$_fresh" ] && [ "$_fresh" != "$BROKER_IP" ]; then
+        log "broker address changed: ${BROKER_IP:-none} -> $_fresh"
+        BROKER_IP=$_fresh
+    fi
 }
 
 # --- resolving the vendor endpoint -----------------------------------------
@@ -66,7 +86,10 @@ is_ezhi() {
 # scan is not needed.
 #
 # Deliberately NOT a lookup by MAC OUI: that would be a guess across hardware
-# revisions, while an API probe is proof.
+# revisions. The probe is better evidence, but not proof of identity - it shows
+# "some device answers getDeviceInfo on port 80". With two APsystems devices on
+# the network the lowest address wins, which may be the wrong one. That is what
+# the source_ip option is for, and why the log asks for it after every find.
 detect_source() {
     # Complete entries only (flags 0x2). The table holds around sixty lines on a
     # normal home network, each probe costs up to a second, and until there is a
@@ -185,7 +208,7 @@ write_state() {
         --argjson packets "$_packets" \
         '{ts: $ts, rule: $rule, addresses: map(select(. != "")),
           packets: $packets, source_ip: $src, broker: $broker}' \
-        > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"
+        > "$STATE_FILE.$$.tmp" && mv "$STATE_FILE.$$.tmp" "$STATE_FILE"
 }
 
 # --- the loop --------------------------------------------------------------
@@ -215,9 +238,25 @@ ensure() {
         return 1
     fi
     _have=$(chain_addresses | tr '\n' ' ')
-    if [ "$_want" = "$_have" ] && chain_matches_options; then
+
+    # Additiv, nicht symmetrisch: nur NEUE Adressen loesen etwas aus. Liefert
+    # der regionale Load Balancer rotierende Teilmengen - bei AWS-artigen
+    # Endpunkten ueblich - unterscheidet sich die Menge sonst jede Runde, und
+    # jede Runde bedeutet Flush plus conntrack-Drop, also einen Verbindungs-
+    # abriss im Takt des Intervalls. Eine Regel fuer eine Adresse, die der
+    # Hersteller nicht mehr benutzt, matcht einfach nie; sie kostet nichts.
+    _new=""
+    for _ip in $_want; do
+        case " $_have " in
+            *" $_ip "*) ;;
+            *) _new="$_new $_ip" ;;
+        esac
+    done
+    if [ -z "$_new" ] && chain_matches_options; then
         return 0
     fi
+    _want=$(printf '%s %s' "$_have" "$_want" | tr ' ' '\n' \
+            | grep -v '^$' | sort -u | tr '\n' ' ')
     log "installing rules for ${_want}(was: ${_have:-none})"
     # $_want, not a second resolve. A DNS blip between the two calls used to
     # hand install_rules an empty list: it flushes first, so the chain ended up
@@ -292,6 +331,7 @@ main() {
         # Jede Runde, nicht nur beim Start: ensure_chain ist idempotent, und
         # ohne den Sprung in PREROUTING greift keine einzige Regel, waehrend
         # ensure() zufrieden ist und der Zaehler auf seinem alten Wert steht.
+        refresh_broker_ip
         ensure_chain
         ensure || true
         _packets=$(packet_count)

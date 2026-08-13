@@ -15,8 +15,9 @@ Meant to be used with the
 
 ## What this add-on does, and what it does not
 
-It holds one `iptables` DNAT rule per resolved vendor address, in its own chain,
-and checks every minute that they are still there.
+It holds one `iptables` DNAT rule per resolved vendor address, in its own
+chain, and re-checks every round (default 60 s, configurable) that the chain,
+its rules and the jump into `PREROUTING` are all still in place.
 
 **It is not a switch.** What decides whether your inverter talks to your broker or
 to the vendor is the **static route in your router**. This add-on only makes sure
@@ -130,6 +131,28 @@ command_line:
         - addresses
         - ts
       scan_interval: 120
+```
+
+Check `ts` as well, not just `rule`. Add-on containers run with
+`RestartPolicy=no`: if this one dies, the file simply stops changing and keeps
+its last `"rule": "ok"` forever. A sensor that reads only `rule` will report a
+dead add-on as healthy.
+
+```yaml
+template:
+  - binary_sensor:
+      - name: EZHI reroute problem
+        # now() is load-bearing: it makes Home Assistant re-render every
+        # minute. Without it this hangs on a state change of the sensor above -
+        # which is exactly what stops happening when the add-on dies.
+        state: >
+          {% set src = 'sensor.ezhi_reroute' %}
+          {% set ts = state_attr(src, 'ts') %}
+          {{ states(src) != 'ok'
+             or ts is none
+             or (now() - (ts | as_datetime)).total_seconds() > 300
+             or (state_attr(src, 'packets') | int(-1)) < 1
+             or (state_attr(src, 'addresses') | count) > 1 }}
 ```
 
 ## When this is the wrong mechanism

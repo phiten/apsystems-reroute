@@ -17,6 +17,16 @@ CONF = {"host": "192.0.2.1", "user": "u", "password": "p",
         "source": "0.0.0.0", "source_mask": "0.0.0.0"}
 
 
+def _fault(code: str, desc: str) -> str:
+    """Die echte Form, in der eine FRITZ!Box einen Fault schickt (HTTP 500)."""
+    return ('<s:Envelope><s:Body><s:Fault><faultcode>s:Client</faultcode>'
+            '<faultstring>UPnPError</faultstring><detail>'
+            '<UPnPError xmlns="urn:schemas-upnp-org:control-1-0">'
+            f'<errorCode>{code}</errorCode>'
+            f'<errorDescription>{desc}</errorDescription>'
+            '</UPnPError></detail></s:Fault></s:Body></s:Envelope>')
+
+
 class BuildEnvelope(unittest.TestCase):
     def test_enable_carries_the_boolean(self):
         body = fr.envelope("SetForwardingEntryEnable", CONF, enable=True)
@@ -40,7 +50,36 @@ class BuildEnvelope(unittest.TestCase):
         self.assertEqual(fr.parse_enable(reply), "1")
 
     def test_parse_returns_zero_when_the_entry_is_gone(self):
-        self.assertEqual(fr.parse_enable("<s:Fault>no such entry</s:Fault>"), "0")
+        """713/714 heisst: die Route steht nicht in der Box. Dann ist sie auch
+        nicht in Kraft, und genau das soll der Schalter zeigen."""
+        self.assertEqual(
+            fr.parse_enable(_fault("713", "SpecifiedArrayIndexInvalid")), "0")
+        self.assertEqual(
+            fr.parse_enable(_fault("714", "NoSuchEntryInArray")), "0")
+
+    def test_any_other_fault_is_unknown_not_off(self):
+        """Der teure Fehler waere, einen Auth- oder Argumentfehler als "aus" zu
+        melden: der Schalter zeigte dann "Wechselrichter in der Cloud", waehrend
+        in Wahrheit niemand weiss, was die Box tut."""
+        for code, desc in (("606", "Action not authorized"),
+                           ("402", "Invalid Args"),
+                           ("501", "Action Failed")):
+            with self.assertRaises(SystemExit) as caught:
+                fr.parse_enable(_fault(code, desc))
+            self.assertIn(code, str(caught.exception))
+            self.assertIn(desc, str(caught.exception))
+
+    def test_a_fault_carries_its_reason_into_the_message(self):
+        """Ohne den Grund im Text ist die Meldung im HA-Log wertlos."""
+        self.assertEqual(
+            fr.fault_reason(_fault("606", "Action not authorized")),
+            "606 Action not authorized")
+        self.assertEqual(fr.fault_reason("<NewEnable>1</NewEnable>"), "")
+
+    def test_a_truncated_reply_yields_empty_not_garbage(self):
+        """Fehlt der Schliess-Tag, gab find() -1 zurueck und das Slice
+        schnitt still das letzte Zeichen ab."""
+        self.assertEqual(fr.field("<NewEnable>1", "NewEnable"), "")
 
 
 class FaultHandling(unittest.TestCase):
@@ -54,8 +93,7 @@ class FaultHandling(unittest.TestCase):
         import urllib.error
         import urllib.request
 
-        fault = (b"<s:Envelope><s:Body><s:Fault><faultstring>UPnPError"
-                 b"</faultstring></s:Fault></s:Body></s:Envelope>")
+        fault = _fault("713", "SpecifiedArrayIndexInvalid").encode()
 
         class Opener:
             def open(self, request, timeout=None):
