@@ -173,5 +173,67 @@ ensure
 check "Adresswechsel loescht den alten Verbindungszustand" "1" \
   "$(grep -c '^conntrack -D' "$STUB_LOG")"
 
+# --- Task 9: die Faelle, die der Review 2026-08-13 aufgedeckt hat -----------
+
+setup
+# H1: gleiche Adressmenge, aber der Nutzer hat den Broker umgestellt. Vorher
+# blieb die alte Regel ewig stehen, weil nur -d verglichen wurde.
+cat > "$WORK/chain" <<'EOF'
+-N EZHI_REROUTE
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+EOF
+STUB_CHAIN="$WORK/chain"; VENDOR_IP=203.0.113.4
+BROKER_IP=192.0.2.99                      # Option geaendert
+ensure
+check "Broker-Wechsel installiert neu" "1" "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
+
+setup
+STUB_CHAIN="$WORK/chain2"
+cat > "$WORK/chain2" <<'EOF'
+-N EZHI_REROUTE
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+EOF
+VENDOR_IP=203.0.113.4
+SOURCE_IP=192.0.2.77                      # Quelle geaendert
+ensure
+check "Quell-Wechsel installiert neu" "1" "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
+
+setup
+STUB_CHAIN="$WORK/chain3"
+cat > "$WORK/chain3" <<'EOF'
+-N EZHI_REROUTE
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+EOF
+VENDOR_IP=203.0.113.4
+ensure
+check "unveraenderte Optionen installieren NICHT neu" "0" "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
+
+setup
+# H2: getent liefert beim ZWEITEN Aufruf nichts. Vorher flushte install_rules
+# die Chain leer (Blackhole) und drop_conntrack riss die Verbindung dazu.
+cat > "$WORK/getent" <<'EOF'
+#!/bin/sh
+n=$(cat "$STUB_LOG.getent" 2>/dev/null || echo 0)
+echo $((n + 1)) > "$STUB_LOG.getent"
+[ "$n" -eq 0 ] && printf '203.0.113.4  STREAM x\n'
+exit 0
+EOF
+chmod +x "$WORK/getent"; export PATH="$WORK:$BASE_PATH"
+ensure
+check "DNS-Blip laesst die Chain nicht leer zurueck" "1" "$(grep -c -- '-A EZHI_REROUTE' "$STUB_LOG")"
+check "und reisst die Verbindung nicht ohne Regeln" "1" "$(grep -c '^conntrack -D' "$STUB_LOG")"
+
+setup
+# M3: Prefix-Kollision. Die eigene Quelle .10 darf die fremde Regel .100 nicht
+# treffen -- ohne /32-Anker loeschte grep sie mit.
+cat > "$WORK/pre" <<'EOF'
+-P PREROUTING ACCEPT
+-A PREROUTING -j EZHI_REROUTE
+-A PREROUTING -s 192.0.2.100/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+EOF
+STUB_PREROUTING="$WORK/pre"
+drop_legacy_rules
+check "fremde Regel mit laengerem Praefix bleibt" "0" "$(grep -c -- '-D PREROUTING' "$STUB_LOG")"
+
 printf '\n%d bestanden, %d fehlgeschlagen\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

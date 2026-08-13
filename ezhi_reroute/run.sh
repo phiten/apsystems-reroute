@@ -147,7 +147,7 @@ drop_legacy_rules() {
     # second grep alone. With no source there is nothing to migrate either.
     [ -n "$SOURCE_IP" ] || return 0
     iptables -t nat -S PREROUTING 2>/dev/null \
-      | grep -- "-s $SOURCE_IP" \
+      | grep -- "-s $SOURCE_IP/32 " \
       | grep -- "--to-destination $BROKER_IP:$PORT" \
       | while read -r rule; do
             # shellcheck disable=SC2086
@@ -196,6 +196,18 @@ write_state() {
 # NEVER fatal: add-ons run with RestartPolicy=no, so a death under `set -e` would
 # leave the container lying there quietly - the rule gone and nobody the wiser.
 # That is the silent break this add-on exists to prevent.
+chain_matches_options() {
+    # Every DNAT rule in the chain has to carry the source and broker the
+    # options ask for right now. Comparing the -d addresses alone is not
+    # enough: change broker_ip or source_ip and the address set is identical,
+    # so nothing would ever be reinstalled and the old rule would keep sending
+    # traffic to the old broker - while the state file, which reports the
+    # option values, cheerfully shows the new one.
+    _total=$(iptables -t nat -S "$CHAIN" 2>/dev/null | grep -c -- '-j DNAT')
+    _ours=$(iptables -t nat -S "$CHAIN" 2>/dev/null | grep -- '-j DNAT' \
+            | grep -c -- "-s $SOURCE_IP/32 .*--to-destination $BROKER_IP:$PORT")
+    [ "$_total" = "$_ours" ]
+}
 ensure() {
     _want=$(resolve_vendor | tr '\n' ' ')
     if [ -z "$_want" ]; then
@@ -203,9 +215,16 @@ ensure() {
         return 1
     fi
     _have=$(chain_addresses | tr '\n' ' ')
-    [ "$_want" = "$_have" ] && return 0
+    if [ "$_want" = "$_have" ] && chain_matches_options; then
+        return 0
+    fi
     log "installing rules for ${_want}(was: ${_have:-none})"
-    install_rules "$(resolve_vendor)"
+    # $_want, not a second resolve. A DNS blip between the two calls used to
+    # hand install_rules an empty list: it flushes first, so the chain ended up
+    # empty - a blackhole while the route is active - and since 0f118bc
+    # drop_conntrack then tore down the connection that would otherwise have
+    # ridden the blip out on its existing translation.
+    install_rules "$_want"
     drop_conntrack
 }
 
@@ -270,6 +289,10 @@ main() {
             continue
         fi
 
+        # Jede Runde, nicht nur beim Start: ensure_chain ist idempotent, und
+        # ohne den Sprung in PREROUTING greift keine einzige Regel, waehrend
+        # ensure() zufrieden ist und der Zaehler auf seinem alten Wert steht.
+        ensure_chain
         ensure || true
         _packets=$(packet_count)
         # Resolve once per round rather than three times: less DNS traffic, and
