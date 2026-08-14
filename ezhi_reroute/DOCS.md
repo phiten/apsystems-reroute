@@ -102,6 +102,11 @@ If the certificate cannot be read, or this host has no address yet, capture does
 not start and the rules stay on the broker. Sending the inverter to a port with
 nothing behind it would be the blackhole below.
 
+Measured end to end against a real inverter on 2026-08-15: the credentials
+appeared about ten seconds after the restart, and the password matched one that
+had been captured by hand, off a packet trace, months earlier. Turning the option
+back off returned the rules to the broker on the next round.
+
 ## The blackhole, and how to avoid it
 
 Docker sets `-P FORWARD DROP` on the host. So with the **route active** and **no

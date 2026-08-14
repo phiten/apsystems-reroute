@@ -20,6 +20,10 @@
   `/ssl`: the inverter has to meet the same one here as it would there. If
   either is missing, or this host has no address yet, the rules stay on the
   broker rather than pointing at a port with nothing behind it.
+  Verified against a real inverter on 2026-08-15: credentials in the log about
+  ten seconds after the restart, and the password matched one captured by hand
+  off a packet trace months earlier. The parser is pinned by a selftest that runs
+  in the test suite and inside the built image.
 - The state file gained a `mode` field, `normal` or `capture`, and `broker` now
   reports where the rules actually point rather than the configured broker.
 
