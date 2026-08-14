@@ -9,7 +9,7 @@ LABEL io.hass.name="EZHI Reroute"
 LABEL io.hass.description="Redirects the APsystems EZHI inverter's MQTT connection to a local broker"
 # Muss beim Versions-Bump zusammen mit config.yaml angehoben werden -
 # der Supervisor liest config.yaml, dieses LABEL ist nur Metadaten.
-LABEL io.hass.version="1.1.0"
+LABEL io.hass.version="1.2.0"
 LABEL io.hass.type="addon"
 LABEL io.hass.arch="aarch64"
 
@@ -22,9 +22,16 @@ LABEL io.hass.arch="aarch64"
 # conntrack-  -> drop the tracked connections after a rule change, so the
 #   tools         inverter re-enters the nat table instead of riding out its old
 #                 translation (see drop_conntrack in run.sh).
-RUN apk add --no-cache iptables jq musl-utils tzdata conntrack-tools
+# python3     -> the credential capture listener. It is the largest thing in this
+#                image by far, and it earns that: the alternative for a user of
+#                the routing mechanism is no way at all to read the password the
+#                inverter presents, because the machine the route points at is
+#                this one and the broker owns the port. Standard library only,
+#                so no pip and no wheels.
+RUN apk add --no-cache iptables jq musl-utils tzdata conntrack-tools python3
 
 COPY run.sh /run.sh
-RUN chmod +x /run.sh
+COPY capture_credentials.py /capture_credentials.py
+RUN chmod +x /run.sh /capture_credentials.py
 
 CMD ["/run.sh"]

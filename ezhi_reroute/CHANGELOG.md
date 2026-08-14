@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.0
+
+- **Added: `capture_credentials`.** Your broker has to accept the inverter, and
+  the inverter authenticates with a password held in its firmware — printed
+  nowhere on it, and not something Mosquitto will tell you, since a rejected
+  client is logged by name and never by password. Reading it off the wire meant
+  standing something on port 9005 in the broker's place, which is awkward
+  everywhere and worst here: with the routing mechanism the only machine the
+  inverter's traffic reaches is this one, and the broker already owns that port.
+
+  Turn the option on and the DNAT rules point at a listener inside this add-on
+  instead, on a port of its own. The inverter arrives within about ten seconds
+  and its client id, username and password go into the log. **The broker does
+  not have to be stopped**, and nothing has to be moved to another machine. Turn
+  the option off and the rules go back to the broker on the next round.
+
+  Set `certfile` and `keyfile` to the certificate your broker serves, under
+  `/ssl`: the inverter has to meet the same one here as it would there. If
+  either is missing, or this host has no address yet, the rules stay on the
+  broker rather than pointing at a port with nothing behind it.
+- The state file gained a `mode` field, `normal` or `capture`, and `broker` now
+  reports where the rules actually point rather than the configured broker.
+
 ## 1.1.0
 
 - **Fixed:** a rule change did not move a connection that was already up. The

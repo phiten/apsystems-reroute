@@ -21,6 +21,11 @@ Built for use with the
    static route to add in your router.
 4. Turn on the **Watchdog** toggle on the add-on's page.
 
+Your broker also has to *accept* the inverter, and the password it presents is
+held in firmware and printed nowhere. The **`capture_credentials`** option reads
+it off the wire for you, without stopping the broker — see
+[the password your broker has to accept](ezhi_reroute/DOCS.md#the-password-your-broker-has-to-accept).
+
 Full documentation: [`ezhi_reroute/DOCS.md`](ezhi_reroute/DOCS.md). Read the
 "When this is the wrong mechanism" section before you commit to this approach —
 for some networks a DNS rewrite is the better fit, and the reason is not effort.

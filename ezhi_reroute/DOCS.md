@@ -59,6 +59,49 @@ WARN the rule is installed but has never matched a packet.
 
 That message means the add-on side is fine and the router side is not.
 
+## The password your broker has to accept
+
+The inverter authenticates. Its client id and username are both the serial number
+on its label; its password is 25 characters held in firmware, printed nowhere,
+and not something your broker will tell you either — a rejected client is logged
+by name and never by password. It has to be read off the wire once.
+
+By hand that means standing something on port 9005 in your broker's place, which
+is awkward everywhere and worst here: with this mechanism the only machine the
+inverter's traffic ever reaches is this one, and the broker already holds that
+port. So the add-on does it instead.
+
+1. Put the certificate your broker serves into `/ssl`, and name the two files in
+   **`certfile`** and **`keyfile`**. The inverter has to meet the same
+   certificate here as it would at the broker.
+2. Turn **`capture_credentials`** on and restart the add-on.
+3. Watch the log. Within about ten seconds:
+
+   ```
+   CAPTURE MODE: the inverter is being sent here instead of to your broker.
+   capture | connection from 192.0.2.10
+   capture | client id : D00000000000
+   capture | username  : D00000000000
+   capture | password  : ****
+   ```
+
+4. Put that username and password into your broker's logins, turn
+   `capture_credentials` back off, and the rules return to the broker on the next
+   round.
+
+**Your broker keeps running throughout.** The listener sits on a port of its own,
+and the DNAT rule is what decides where the inverter lands — so nothing has to be
+stopped and nothing has to move to another machine.
+
+Capture always redirects to **this** host, even when `broker_ip` points somewhere
+else. DNAT rewrites the destination and not the source, so a third machine would
+answer the inverter under its own address, and the inverter would discard the
+reply: it is waiting to hear from the vendor.
+
+If the certificate cannot be read, or this host has no address yet, capture does
+not start and the rules stay on the broker. Sending the inverter to a port with
+nothing behind it would be the blackhole below.
+
 ## The blackhole, and how to avoid it
 
 Docker sets `-P FORWARD DROP` on the host. So with the **route active** and **no
@@ -98,9 +141,15 @@ Every check writes `/share/ezhi_reroute.json`:
   "addresses": ["198.51.100.7"],
   "packets": 1,
   "source_ip": "192.0.2.10",
-  "broker": "192.0.2.20:9005"
+  "broker": "192.0.2.20:9005",
+  "mode": "normal"
 }
 ```
+
+**`broker` is where the rules actually point**, not the configured `broker_ip`.
+In capture mode it names this host and the capture port, and `mode` reads
+`capture` — which is also the honest answer to "why is my broker seeing
+nothing".
 
 **`packets` settles at a small number and does not grow.** The nat table counts
 only the first packet of each connection, and the inverter holds one long-lived

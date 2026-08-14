@@ -19,6 +19,9 @@ setup() {
     : > "$STUB_LOG"
     SOURCE_IP=192.0.2.10; BROKER_IP=192.0.2.20; PORT=9005
     DNS_NAME=broker.example.invalid; VENDOR_IP=""
+    # What load_options ends with in production. Anything that changes BROKER_IP
+    # or CAPTURE has to call set_target again, exactly as the daemon loop does.
+    CAPTURE=false; CERTFILE=""; KEYFILE=""; set_target
 }
 
 check() {   # check <name> <expected> <actual>
@@ -183,7 +186,7 @@ cat > "$WORK/chain" <<'EOF'
 -A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
 EOF
 STUB_CHAIN="$WORK/chain"; VENDOR_IP=203.0.113.4
-BROKER_IP=192.0.2.99                      # Option geaendert
+BROKER_IP=192.0.2.99; set_target          # Option geaendert
 ensure
 check "Broker-Wechsel installiert neu" "1" "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
 
@@ -300,6 +303,65 @@ cat > "$WORK/options.json" <<'EOF'
 EOF
 EZHI_OPTIONS="$WORK/options.json" load_options >/dev/null 2>&1
 check "fehlendes check_interval faellt auf 60" "60" "$INTERVAL"
+
+# --- Task 10: capture mode -------------------------------------------------
+
+stub_host_ip() {   # stub_host_ip <adresse|"">
+    if [ -n "$1" ]; then
+        printf '#!/bin/sh\necho "1.1.1.1 via 192.0.2.1 dev eth0 src %s uid 0"\n' "$1" > "$WORK/ip"
+    else
+        printf '#!/bin/sh\nexit 0\n' > "$WORK/ip"
+    fi
+    chmod +x "$WORK/ip"; export PATH="$WORK:$BASE_PATH"
+}
+
+setup
+stub_host_ip 192.0.2.55
+CAPTURE=true; set_target
+check "Capture zielt auf diesen Host und den Capture-Port" "192.0.2.55:19005" "$TARGET"
+
+setup
+# Der Broker steht woanders. Capture darf ihm NICHT folgen: DNAT schreibt nur das
+# Ziel um, also antwortete die fremde Maschine unter ihrer eigenen Adresse und
+# der Wechselrichter verwirft die Antwort - er wartet auf den Hersteller.
+stub_host_ip 192.0.2.55
+BROKER_IP=198.51.100.7; CAPTURE=true; set_target
+check "Capture ignoriert broker_ip" "192.0.2.55:19005" "$TARGET"
+
+setup
+# Ohne Host-Adresse (Boot-Race) waere das Ziel ":19005". Jedes -A nach dem -F
+# scheitert daran, die Chain bleibt leer - genau das Blackhole.
+stub_host_ip ""
+CAPTURE=true; set_target
+check "ohne Host-Adresse bleibt es beim Broker" "192.0.2.20:9005" "$TARGET"
+
+setup
+stub_host_ip 192.0.2.55
+CAPTURE=true; set_target
+install_rules "203.0.113.4"
+check "die Regel traegt den Capture-Port" "1" \
+      "$(grep -c -- '--to-destination 192.0.2.55:19005' "$STUB_LOG")"
+
+setup
+# Capture wieder aus: die installierten Regeln zeigen noch auf den Capture-Port,
+# passen also nicht mehr zu den Optionen und muessen neu geschrieben werden.
+cat > "$WORK/chain" <<'EOF'
+-N EZHI_REROUTE
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.55:19005
+EOF
+STUB_CHAIN="$WORK/chain"; VENDOR_IP=203.0.113.4
+ensure
+check "Capture aus installiert neu" "1" "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
+check "und zeigt wieder auf den Broker" "1" \
+      "$(grep -c -- '--to-destination 192.0.2.20:9005' "$STUB_LOG")"
+
+# Derselbe Selbsttest, den die Datei auch im Integrations-Repo mitbringt.
+if command -v python3 >/dev/null 2>&1; then
+    check "capture_credentials selftest" "selftest ok" \
+          "$(python3 "$HERE/../ezhi_reroute/capture_credentials.py" selftest 2>&1)"
+else
+    printf 'SKIP capture_credentials selftest (kein python3)\n'
+fi
 
 printf '\n%d bestanden, %d fehlgeschlagen\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

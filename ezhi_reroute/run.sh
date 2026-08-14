@@ -11,6 +11,12 @@ OPTS=${EZHI_OPTIONS:-/data/options.json}
 STATE_FILE=${EZHI_STATE_FILE:-/share/ezhi_reroute.json}
 ARP_TABLE=${ARP_TABLE:-/proc/net/arp}
 CHAIN=EZHI_REROUTE
+# Where the capture listener sits while capture_credentials is on. A port of its
+# own rather than 9005, so the broker keeps that one and never has to be stopped
+# -- the DNAT rule is what decides where the inverter lands, not the port number
+# it dialled. Not an option: nothing outside this file has any use for it.
+CAPTURE_PORT=19005
+CAPTURE_SCRIPT=${CAPTURE_SCRIPT:-/capture_credentials.py}
 
 # The add-on log has no timestamps of its own. Local time comes from TZ, which
 # the Supervisor sets - that is why the image carries tzdata.
@@ -42,6 +48,37 @@ load_options() {
 
     BROKER_OPT="$BROKER_IP"
     [ -n "$BROKER_IP" ] || BROKER_IP=$(host_ip)
+
+    CAPTURE=$(opt capture_credentials)
+    CERTFILE=$(opt certfile)
+    KEYFILE=$(opt keyfile)
+    set_target
+}
+
+# Where the DNAT rules point. Normally the broker; in capture mode the listener
+# on this host.
+#
+# Capture deliberately ignores broker_ip and uses this host's own address, even
+# when the broker is elsewhere. DNAT rewrites the destination and nothing else,
+# so a machine that is not this one would answer the inverter under its own
+# address and the inverter would drop the reply - it is waiting to hear from the
+# vendor. Redirecting to somewhere on this host keeps the return path intact,
+# because conntrack undoes the translation on the way back.
+set_target() {
+    if [ "${CAPTURE:-false}" = "true" ]; then
+        _here=$(host_ip)
+        if [ -n "$_here" ]; then
+            TARGET="$_here:$CAPTURE_PORT"
+            return 0
+        fi
+        # No address yet (the boot race host_ip already warns about elsewhere).
+        # Falling back to the broker keeps the inverter working; entering capture
+        # mode with an empty address would write ":19005" and every -A after the
+        # -F would fail, which is the blackhole this add-on exists to avoid.
+        log "WARN capture_credentials is on but this host has no address yet -"
+        log "     staying on the broker for now, retrying next round."
+    fi
+    TARGET="$BROKER_IP:$PORT"
 }
 
 refresh_broker_ip() {
@@ -155,7 +192,7 @@ install_rules() {
     iptables -t nat -F "$CHAIN"
     for ip in $1; do
         iptables -t nat -A "$CHAIN" -s "$SOURCE_IP" -d "$ip" \
-                 -p tcp --dport "$PORT" -j DNAT --to-destination "$BROKER_IP:$PORT"
+                 -p tcp --dport "$PORT" -j DNAT --to-destination "$TARGET"
     done
 }
 
@@ -204,10 +241,11 @@ write_state() {
         --arg ts "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
         --arg rule "$_rule" \
         --arg src "$SOURCE_IP" \
-        --arg broker "$BROKER_IP:$PORT" \
+        --arg broker "$TARGET" \
+        --arg mode "$([ "${CAPTURE:-false}" = "true" ] && echo capture || echo normal)" \
         --argjson packets "$_packets" \
         '{ts: $ts, rule: $rule, addresses: map(select(. != "")),
-          packets: $packets, source_ip: $src, broker: $broker}' \
+          packets: $packets, source_ip: $src, broker: $broker, mode: $mode}' \
         > "$STATE_FILE.$$.tmp" && mv "$STATE_FILE.$$.tmp" "$STATE_FILE"
 }
 
@@ -226,9 +264,12 @@ chain_matches_options() {
     # so nothing would ever be reinstalled and the old rule would keep sending
     # traffic to the old broker - while the state file, which reports the
     # option values, cheerfully shows the new one.
+    # Also what puts capture mode into effect and takes it out again: TARGET
+    # changes, every rule stops matching, and the next ensure() reinstalls the
+    # lot. Turning the option on or off needs nothing else.
     _total=$(iptables -t nat -S "$CHAIN" 2>/dev/null | grep -c -- '-j DNAT')
     _ours=$(iptables -t nat -S "$CHAIN" 2>/dev/null | grep -- '-j DNAT' \
-            | grep -c -- "-s $SOURCE_IP/32 .*--to-destination $BROKER_IP:$PORT")
+            | grep -c -- "-s $SOURCE_IP/32 .*--to-destination $TARGET")
     [ "$_total" = "$_ours" ]
 }
 ensure() {
@@ -267,6 +308,41 @@ ensure() {
     drop_conntrack
 }
 
+# Answers in the broker's place while capture mode is on, and prints what the
+# inverter presented. Backgrounded, and restarted after each capture, so a second
+# look does not need the add-on restarted.
+#
+# Returns non-zero when it cannot run, and the caller then leaves the rules
+# pointing at the broker: sending the inverter to a port with nothing behind it
+# would be exactly the blackhole this add-on exists to avoid.
+start_capture() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        log "WARN capture_credentials is on, but python3 is not in this image."
+        return 1
+    fi
+    _cert="/ssl/$CERTFILE"
+    _key="/ssl/$KEYFILE"
+    if [ ! -r "$_cert" ] || [ ! -r "$_key" ]; then
+        log "WARN capture_credentials is on, but $_cert or $_key cannot be read."
+        log "     Set certfile and keyfile to the certificate your broker serves."
+        log "     The inverter has to meet the same one here as it would there."
+        return 1
+    fi
+    log "CAPTURE MODE: the inverter is being sent here instead of to your broker."
+    log "     Its credentials appear below within about ten seconds. Turn"
+    log "     capture_credentials off again once you have them."
+    (
+        while :; do
+            python3 "$CAPTURE_SCRIPT" listen --port "$CAPTURE_PORT" \
+                    --cert "$_cert" --key "$_key" --timeout 3600 2>&1 \
+              | while IFS= read -r _line; do log "capture | $_line"; done
+            sleep 10
+        done
+    ) &
+    CAPTURE_PID=$!
+    return 0
+}
+
 # On SIGTERM we exit, but we deliberately do NOT remove the rule.
 #
 # Why the rule stays: it only matches `-s <inverter> -d <vendor>:<port>`. With the
@@ -286,12 +362,21 @@ ensure() {
 # grace period, every single stop.
 on_term() {
     log "stopping - the rule stays; the route in your router is the switch"
+    [ -n "${CAPTURE_PID:-}" ] && kill "$CAPTURE_PID" 2>/dev/null
     exit 0
 }
 trap on_term INT TERM
 
 main() {
     load_options
+
+    # Before any rule is written: if the listener cannot come up, the rules must
+    # keep pointing at the broker rather than at a port with nothing behind it.
+    if [ "${CAPTURE:-false}" = "true" ] && ! start_capture; then
+        CAPTURE=false
+        set_target
+        log "     Staying on the broker. Nothing is redirected away from it."
+    fi
 
     if [ -z "$SOURCE_IP" ]; then
         if SOURCE_IP=$(detect_source); then
@@ -309,7 +394,7 @@ main() {
     if [ -n "$SOURCE_IP" ]; then
         ensure || true
     fi
-    log "active: ${SOURCE_IP:-<unknown>} -> $DNS_NAME:$PORT  ==>  $BROKER_IP:$PORT (every ${INTERVAL}s)"
+    log "active: ${SOURCE_IP:-<unknown>} -> $DNS_NAME:$PORT  ==>  $TARGET (every ${INTERVAL}s)"
 
     zero_rounds=0
     while :; do
@@ -332,6 +417,7 @@ main() {
         # ohne den Sprung in PREROUTING greift keine einzige Regel, waehrend
         # ensure() zufrieden ist und der Zaehler auf seinem alten Wert steht.
         refresh_broker_ip
+        set_target
         ensure_chain
         ensure || true
         _packets=$(packet_count)

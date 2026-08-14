@@ -1,5 +1,5 @@
 name: "EZHI Reroute"
-version: "1.1.0"
+version: "1.2.0"
 slug: "ezhi_reroute"
 description: "Redirects the APsystems EZHI inverter's MQTT connection to a broker you control."
 url: "https://github.com/Glenbeulah/ezhi-reroute"
@@ -18,9 +18,12 @@ init: false
 host_network: true
 privileged:
   - NET_ADMIN
-# share:rw for the state file that Home Assistant reads.
+# share:rw for the state file that Home Assistant reads. ssl:ro for the broker's
+# certificate, which capture mode has to present -- read-only, because this
+# add-on has no business writing there.
 map:
   - share:rw
+  - ssl:ro
 # boot: auto is mandatory rather than a preference. The host has -P FORWARD DROP.
 # If it reboots while the route in your router is active and this add-on does not
 # come up with it, the inverter's packets fall into the forward path and are
@@ -34,6 +37,9 @@ options:
   broker_ip: ""
   port: 9005
   check_interval: 60
+  capture_credentials: false
+  certfile: ""
+  keyfile: ""
 # match() rather than str: $ARGS is expanded unquoted in run.sh (it is an
 # argument vector). A value containing spaces would split into extra iptables
 # arguments. The empty alternative is what enables auto-detection.
@@ -44,3 +50,8 @@ schema:
   broker_ip: 'match(^$|^[0-9]{1,3}(\.[0-9]{1,3}){3}$)'
   port: port
   check_interval: int(10,3600)
+  capture_credentials: bool
+  # Bare filenames under /ssl, no slashes: these are interpolated into a path,
+  # and there is no reason for this add-on to read anything outside that folder.
+  certfile: 'match(^$|^[A-Za-z0-9._-]+$)'
+  keyfile: 'match(^$|^[A-Za-z0-9._-]+$)'
