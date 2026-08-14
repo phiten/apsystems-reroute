@@ -231,9 +231,19 @@ at bridging your broker to the vendor cloud instead. It has real downsides — y
 broker becomes a permanent man-in-the-middle and a single point of failure for the
 cloud path as well — but it needs no switch. The integration's README covers it.
 
-What this add-on does have over the DNS approaches: the rule is bound to the
-inverter's address, so **the vendor app on your phone keeps working at home**. A
-network-wide DNS rewrite redirects the app along with the inverter.
+What this add-on has over the DNS approaches is real but narrower than it sounds.
+The rule is bound to the inverter's address, so the app on your phone is never
+redirected: it reaches the vendor as usual, logs in, and behaves normally. A
+network-wide DNS rewrite would send the app's own MQTT to your broker along with
+the inverter's.
+
+**It will still show your inverter as offline** — measured 2026-08-15 on a phone
+on the home network, with Home Assistant controlling the device happily at the
+same time. That is not the redirect failing, it is the redirect working: the
+inverter has left the vendor cloud, the cloud therefore knows nothing about it,
+and the app reports what the cloud knows. Every mechanism on this page does that,
+this one included. Keeping the app's view alive takes the bridging broker above,
+and nothing less.
 
 ## Known limitations
 
