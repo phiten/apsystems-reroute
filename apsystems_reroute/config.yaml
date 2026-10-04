@@ -11,6 +11,7 @@ url: "https://github.com/Glenbeulah/ezhi-reroute"
 # has built and run attracts exactly the users it fails for. See DOCS.md.
 arch:
   - aarch64
+  - amd64
 init: false
 # host_network + NET_ADMIN are mandatory: without the host network namespace the
 # container would write its iptables rule into its own netns, where it does
