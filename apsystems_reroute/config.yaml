@@ -1,8 +1,8 @@
-name: "EZHI Reroute"
-version: "1.2.0"
-slug: "ezhi_reroute"
-description: "Redirects the APsystems EZHI inverter's MQTT connection to a broker you control."
-url: "https://github.com/Glenbeulah/ezhi-reroute"
+name: "APSystems Reroute"
+version: "1.3.0"
+slug: "apsystems_reroute"
+description: "Redirects APsystems MQTT connections to a broker you control."
+url: "https://github.com/phiten/apsystems-reroute"
 # aarch64 only, and that is not laziness. The iptables compatibility this add-on
 # depends on (container 1.8.13 nf_tables against the host's 1.8.11 nf_tables) was
 # verified on an aarch64 HAOS host. On an amd64 host running the legacy backend,
@@ -41,11 +41,11 @@ options:
   capture_credentials: false
   certfile: ""
   keyfile: ""
-# match() rather than str: $ARGS is expanded unquoted in run.sh (it is an
-# argument vector). A value containing spaces would split into extra iptables
-# arguments. The empty alternative is what enables auto-detection.
+# match() rather than str: source_ip accepts comma-separated IPv4 addresses,
+# and the empty alternative enables auto-detection. Whitespace around commas
+# is accepted and normalized before the addresses reach iptables.
 schema:
-  source_ip: 'match(^$|^[0-9]{1,3}(\.[0-9]{1,3}){3}$)'
+  source_ip: 'match(^$|^[0-9]{1,3}(\.[0-9]{1,3}){3}(\s*,\s*[0-9]{1,3}(\.[0-9]{1,3}){3})*$)'
   dns_name: str
   vendor_ip: 'match(^$|^[0-9]{1,3}(\.[0-9]{1,3}){3}$)'
   broker_ip: 'match(^$|^[0-9]{1,3}(\.[0-9]{1,3}){3}$)'

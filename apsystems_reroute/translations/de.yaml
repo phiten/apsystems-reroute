@@ -1,10 +1,10 @@
 configuration:
   source_ip:
-    name: IP-Adresse des Wechselrichters
+    name: IP-Adressen des Wechselrichters
     description: >-
-      Leer lassen für automatische Erkennung. Die Regel ist an diese Adresse
-      gebunden, es wird also nur dieses eine Gerät umgeleitet — die Hersteller-App
-      auf dem Handy funktioniert im Heimnetz weiter.
+      Leer lassen für automatische Erkennung. Mehrere Geräte als kommaseparierte
+      IPv4-Adressen eintragen. Alle Geräte werden zum selben Broker umgeleitet;
+      die Hersteller-App auf dem Handy funktioniert im Heimnetz weiter.
   dns_name:
     name: MQTT-Hostname des Herstellers
     description: >-

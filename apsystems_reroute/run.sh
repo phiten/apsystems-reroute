@@ -26,6 +26,17 @@ log() { echo "[ezhi_reroute] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 
 opt() { jq -r "(.$1 // \"\") | tostring" "$OPTS"; }
 
+normalize_source_ips() {
+    SOURCE_IP=$(printf '%s\n' "$SOURCE_IP" | tr ',' '\n' \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+        | grep -v '^$' | sort -u \
+        | awk '{ if (NR > 1) printf ","; printf "%s", $0 }')
+}
+
+source_ips() {
+    printf '%s\n' "$SOURCE_IP" | tr ',' '\n'
+}
+
 # This host's LAN address. With host_network that is also the address the
 # Mosquitto add-on listens on, which is the common case.
 host_ip() {
@@ -35,6 +46,7 @@ host_ip() {
 
 load_options() {
     SOURCE_IP=$(opt source_ip)
+    normalize_source_ips
     VENDOR_IP=$(opt vendor_ip)
     BROKER_IP=$(opt broker_ip)
     DNS_NAME=$(opt dns_name)
@@ -157,11 +169,13 @@ chain_addresses() {
       | sed 's#/32$##' | sort -u
 }
 
-# Flushes the chain and installs exactly one rule per address.
-#
-# Called ONLY when the address set actually changed: every flush resets the
-# packet counters, and those carry the one diagnostic that tells a user their
-# router is not forwarding anything here.
+chain_sources() {
+        iptables -t nat -S "$CHAIN" 2>/dev/null \
+            | awk '/-j DNAT/ { for (i = 1; i < NF; i++) if ($i == "-s") print $(i + 1) }' \
+            | sed 's#/32$##' | sort -u
+}
+
+# Drops tracked connections for sources whose rules are changing.
 drop_conntrack() {
     # The nat table only ever sees the FIRST packet of a connection; every
     # packet after it follows the conntrack entry made back then. A rule change
@@ -173,10 +187,11 @@ drop_conntrack() {
     # means. Measured 2026-08-13: the counter survives a container restart
     # untouched, because ensure_chain does not flush - only a rule change does.
     #
-    # Scoped to this inverter and this port. The HAOS host runs other DNAT of
-    # its own (Tailscale), and a blanket flush would drop connections that have
-    # nothing to do with us.
-    [ -n "$SOURCE_IP" ] || return 0
+    # Scope deletions to configured sources and this port. The HAOS host runs
+    # other DNAT of its own (Tailscale), so a blanket flush is unsafe.
+    _drop_sources=$(printf '%s\n%s\n' "$SOURCE_IP" "${1:-}" \
+        | tr ',' '\n' | grep -v '^$' | sort -u)
+    [ -n "$_drop_sources" ] || return 0
     if ! command -v conntrack >/dev/null 2>&1; then
         log "WARN conntrack is missing - the inverter keeps its existing"
         log "     connection until it reconnects on its own, so the packet"
@@ -185,14 +200,18 @@ drop_conntrack() {
     fi
     # Exit code 1 means "nothing matched", which is the ordinary case: the
     # inverter may not have a connection up. Under set -e that would be fatal.
-    conntrack -D -s "$SOURCE_IP" -p tcp --dport "$PORT" || true
+    for _source in $_drop_sources; do
+        conntrack -D -s "$_source" -p tcp --dport "$PORT" || true
+    done
 }
 
 install_rules() {
     iptables -t nat -F "$CHAIN"
     for ip in $1; do
-        iptables -t nat -A "$CHAIN" -s "$SOURCE_IP" -d "$ip" \
-                 -p tcp --dport "$PORT" -j DNAT --to-destination "$TARGET"
+        for _source in $(source_ips); do
+            iptables -t nat -A "$CHAIN" -s "$_source" -d "$ip" \
+                     -p tcp --dport "$PORT" -j DNAT --to-destination "$TARGET"
+        done
     done
 }
 
@@ -206,16 +225,18 @@ drop_legacy_rules() {
     # includes the Tailscale DNAT rules. Correctness would then rest on the
     # second grep alone. With no source there is nothing to migrate either.
     [ -n "$SOURCE_IP" ] || return 0
-    iptables -t nat -S PREROUTING 2>/dev/null \
-      | grep -- "-s $SOURCE_IP/32 " \
-      | grep -- "--to-destination $BROKER_IP:$PORT" \
-      | while read -r rule; do
-            # shellcheck disable=SC2086
-            set -- $rule
-            shift                                  # drop the leading -A
-            log "removing a leftover rule from version 0.3.0"
-            iptables -t nat -D "$@" 2>/dev/null || true
-        done
+    for _source in $(source_ips); do
+        iptables -t nat -S PREROUTING 2>/dev/null \
+          | grep -- "-s $_source/32 " \
+          | grep -- "--to-destination $BROKER_IP:$PORT" \
+          | while read -r rule; do
+                # shellcheck disable=SC2086
+                set -- $rule
+                shift                                  # drop the leading -A
+                log "removing a leftover rule from version 0.3.0"
+                iptables -t nat -D "$@" 2>/dev/null || true
+            done
+    done
 }
 
 # CAREFUL, semantics: the nat table counts only the FIRST packet of each
@@ -258,19 +279,26 @@ write_state() {
 # leave the container lying there quietly - the rule gone and nobody the wiser.
 # That is the silent break this add-on exists to prevent.
 chain_matches_options() {
-    # Every DNAT rule in the chain has to carry the source and broker the
-    # options ask for right now. Comparing the -d addresses alone is not
-    # enough: change broker_ip or source_ip and the address set is identical,
-    # so nothing would ever be reinstalled and the old rule would keep sending
-    # traffic to the old broker - while the state file, which reports the
-    # option values, cheerfully shows the new one.
+    # Every configured source/vendor-address pair must point at TARGET.
+    # Comparing destination addresses alone misses a changed source or broker,
+    # leaving old rules in place while the state file reports the new options.
     # Also what puts capture mode into effect and takes it out again: TARGET
     # changes, every rule stops matching, and the next ensure() reinstalls the
     # lot. Turning the option on or off needs nothing else.
     _total=$(iptables -t nat -S "$CHAIN" 2>/dev/null | grep -c -- '-j DNAT')
-    _ours=$(iptables -t nat -S "$CHAIN" 2>/dev/null | grep -- '-j DNAT' \
-            | grep -c -- "-s $SOURCE_IP/32 .*--to-destination $TARGET")
-    [ "$_total" = "$_ours" ]
+    _expected=0
+    for _source in $(source_ips); do
+        for _destination in $(chain_addresses); do
+            _matches=$(iptables -t nat -S "$CHAIN" 2>/dev/null \
+                | awk -v source="-s $_source/32 " \
+                      -v destination="-d $_destination/32 " \
+                      -v target="--to-destination $TARGET" \
+                      '/-j DNAT/ && index($0, source) && index($0, destination) && index($0, target) { count++ } END { print count + 0 }')
+            [ "$_matches" = 1 ] || return 1
+            _expected=$((_expected + 1))
+        done
+    done
+    [ "$_total" = "$_expected" ]
 }
 ensure() {
     _want=$(resolve_vendor | tr '\n' ' ')
@@ -304,8 +332,9 @@ ensure() {
     # empty - a blackhole while the route is active - and since 0f118bc
     # drop_conntrack then tore down the connection that would otherwise have
     # ridden the blip out on its existing translation.
+    _old_sources=$(chain_sources | tr '\n' ',')
     install_rules "$_want"
-    drop_conntrack
+    drop_conntrack "$_old_sources"
 }
 
 # Answers in the broker's place while capture mode is on, and prints what the

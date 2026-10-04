@@ -1,10 +1,10 @@
 configuration:
   source_ip:
-    name: Inverter IP address
+    name: Inverter IP addresses
     description: >-
-      Leave empty to detect it automatically. The rule is bound to this address,
-      so only this one device is redirected - the vendor app on your phone keeps
-      working while it is on your home network.
+      Leave empty to detect it automatically. Enter multiple devices as
+      comma-separated IPv4 addresses. All devices are redirected to the same
+      broker; the vendor app on your phone keeps working on your home network.
   dns_name:
     name: Vendor MQTT hostname
     description: >-

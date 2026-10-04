@@ -43,6 +43,11 @@ You do not have to look the address up. Start the add-on and read its log:
 
 The address after `installing rules for` is the one your route needs.
 
+Set `source_ip` to a comma-separated list to redirect multiple inverters, for
+example `192.0.2.10,192.0.2.11`. Each device gets rules for the same vendor
+addresses and is sent to the same broker. Leave the option empty for automatic
+detection of one inverter.
+
 Your broker must listen on **port 9005 with TLS 1.2** and present a certificate
 for the vendor's MQTT hostname. Self-signed is fine — the device validates
 nothing, which is the whole reason this works.

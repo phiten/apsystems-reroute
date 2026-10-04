@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+- **Added:** `source_ip` accepts a comma-separated list of inverter IPv4
+  addresses. Each source is redirected to the same broker, and existing
+  single-address and automatic-detection behavior is unchanged.
+
 ## 1.2.0
 
 - **Added: `capture_credentials`.** Your broker has to accept the inverter, and

@@ -29,7 +29,7 @@ check() {   # check <name> <expected> <actual>
     else FAIL=$((FAIL+1)); printf 'FAIL %s\n  erwartet: [%s]\n  ist:      [%s]\n' "$1" "$2" "$3"; fi
 }
 
-. "$HERE/../ezhi_reroute/run.sh"
+. "$HERE/../apsystems_reroute/run.sh"
 
 # run.sh sets `set -eu` for daemon use. The harness must undo that: a test that
 # checks a FAILURE - $(detect_source >/dev/null 2>&1; echo $?) - would abort the
@@ -73,6 +73,18 @@ check "eine Regel je Adresse" "2" "$(grep -c -- '-A EZHI_REROUTE' "$STUB_LOG")"
 check "Chain wird zuerst geleert" "1" "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
 check "jede Regel bindet die Quelle" "2" "$(grep -c -- '-s 192.0.2.10' "$STUB_LOG")"
 
+setup
+SOURCE_IP="192.0.2.11, 192.0.2.10,192.0.2.11"
+normalize_source_ips
+check "Quellliste wird getrimmt und dedupliziert" "192.0.2.10,192.0.2.11" "$SOURCE_IP"
+install_rules "203.0.113.4
+203.0.113.9"
+check "jede Quelle bekommt jedes Herstellerziel" "4" "$(grep -c -- '-A EZHI_REROUTE' "$STUB_LOG")"
+check "beide Quellen verwenden dasselbe DNAT-Ziel" "4" \
+  "$(grep -c -- '--to-destination 192.0.2.20:9005' "$STUB_LOG")"
+check "Quell-IP .10 wird pro Ziel verwendet" "2" "$(grep -c -- '-s 192.0.2.10 ' "$STUB_LOG")"
+check "Quell-IP .11 wird pro Ziel verwendet" "2" "$(grep -c -- '-s 192.0.2.11 ' "$STUB_LOG")"
+
 # --- Task 4: migrating away from the 0.3.0 rule ---------------------------
 
 setup
@@ -87,6 +99,19 @@ drop_legacy_rules
 check "genau die eigene Alt-Regel wird geloescht" "1" "$(grep -c -- '-D PREROUTING' "$STUB_LOG")"
 check "fremde DNAT-Regel bleibt unangetastet" "0" "$(grep -c -- '192.0.2.77' "$STUB_LOG")"
 check "der Chain-Sprung wird nicht geloescht" "0" "$(grep -c -- '-D PREROUTING -j EZHI_REROUTE' "$STUB_LOG")"
+
+setup
+SOURCE_IP="192.0.2.10,192.0.2.11"
+cat > "$WORK/pre" <<'EOF'
+-P PREROUTING ACCEPT
+-A PREROUTING -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+-A PREROUTING -s 192.0.2.11/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+-A PREROUTING -s 192.0.2.99/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+EOF
+STUB_PREROUTING="$WORK/pre"
+drop_legacy_rules
+check "Legacy-Regeln beider Quellen werden entfernt" "2" "$(grep -c -- '-D PREROUTING' "$STUB_LOG")"
+check "fremde Quelle bleibt erhalten" "0" "$(grep -c -- '192.0.2.99' "$STUB_LOG")"
 
 # --- Task 5: proving the inverter address ---------------------------------
 
@@ -148,6 +173,12 @@ check "conntrack wird auf Quelle und Port eingegrenzt" "1" \
   "$(grep -c '^conntrack -D -s 192.0.2.10 -p tcp --dport 9005$' "$STUB_LOG")"
 
 setup
+SOURCE_IP="192.0.2.10,192.0.2.11"
+drop_conntrack
+check "conntrack wird fuer jede Quelle geloescht" "2" \
+  "$(grep -c '^conntrack -D -s 192.0.2.1[01] -p tcp --dport 9005$' "$STUB_LOG")"
+
+setup
 check "nichts zu loeschen ist kein Fehler" "0" \
   "$( (STUB_CT_RC=1; export STUB_CT_RC; drop_conntrack; echo $?) )"
 
@@ -200,6 +231,7 @@ VENDOR_IP=203.0.113.4
 SOURCE_IP=192.0.2.77                      # Quelle geaendert
 ensure
 check "Quell-Wechsel installiert neu" "1" "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
+check "alte und neue Quelle verlieren Conntrack" "2" "$(grep -c '^conntrack -D' "$STUB_LOG")"
 
 setup
 STUB_CHAIN="$WORK/chain3"
@@ -210,6 +242,35 @@ EOF
 VENDOR_IP=203.0.113.4
 ensure
 check "unveraenderte Optionen installieren NICHT neu" "0" "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
+
+setup
+SOURCE_IP="192.0.2.10,192.0.2.11"
+VENDOR_IP="203.0.113.4 203.0.113.9"
+cat > "$WORK/chain-multi" <<'EOF'
+-N EZHI_REROUTE
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+-A EZHI_REROUTE -s 192.0.2.11/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.9/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+-A EZHI_REROUTE -s 192.0.2.11/32 -d 203.0.113.9/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+EOF
+STUB_CHAIN="$WORK/chain-multi"
+ensure
+check "vollstaendiges Mehrquellen-Regelset bleibt unveraendert" "0" \
+  "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
+
+setup
+SOURCE_IP="192.0.2.10,192.0.2.11"
+VENDOR_IP="203.0.113.4"
+cat > "$WORK/chain-incomplete" <<'EOF'
+-N EZHI_REROUTE
+-A EZHI_REROUTE -s 192.0.2.10/32 -d 203.0.113.4/32 -p tcp -m tcp --dport 9005 -j DNAT --to-destination 192.0.2.20:9005
+EOF
+STUB_CHAIN="$WORK/chain-incomplete"
+ensure
+check "fehlende Quellregel wird repariert" "1" \
+  "$(grep -c -- '-F EZHI_REROUTE' "$STUB_LOG")"
+check "Reparatur schreibt fuer beide Quellen" "2" \
+  "$(grep -c -- '-A EZHI_REROUTE' "$STUB_LOG")"
 
 setup
 # H2: getent liefert beim ZWEITEN Aufruf nichts. Vorher flushte install_rules
@@ -358,7 +419,7 @@ check "und zeigt wieder auf den Broker" "1" \
 # Derselbe Selbsttest, den die Datei auch im Integrations-Repo mitbringt.
 if command -v python3 >/dev/null 2>&1; then
     check "capture_credentials selftest" "selftest ok" \
-          "$(python3 "$HERE/../ezhi_reroute/capture_credentials.py" selftest 2>&1)"
+          "$(python3 "$HERE/../apsystems_reroute/capture_credentials.py" selftest 2>&1)"
 else
     printf 'SKIP capture_credentials selftest (kein python3)\n'
 fi
