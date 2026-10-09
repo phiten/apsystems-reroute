@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.0
+
+- **Changed:** the add-on repository now lives at
+  `https://github.com/phiten/apsystems-reroute`. Anyone who added the old
+  repository URL to Home Assistant has to add this one to keep receiving
+  updates.
+- **Changed:** the README and docs name the add-on "APSystems Reroute" and link
+  to the `apsystems_reroute` folder and to the `phiten/EZHI` integration.
+  The iptables chain, the state file and the log prefix keep their `ezhi`
+  names, so existing installations behave exactly as before.
+
 ## 1.3.0
 
 - **Added:** `source_ip` accepts a comma-separated list of inverter IPv4

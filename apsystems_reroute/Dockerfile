@@ -9,7 +9,7 @@ LABEL io.hass.name="APSystems Reroute"
 LABEL io.hass.description="Redirects APsystems MQTT connections to a local broker"
 # Muss beim Versions-Bump zusammen mit config.yaml angehoben werden -
 # der Supervisor liest config.yaml, dieses LABEL ist nur Metadaten.
-LABEL io.hass.version="1.3.1"
+LABEL io.hass.version="1.4.0"
 LABEL io.hass.type="addon"
 # LABEL io.hass.arch="aarch64"
 
