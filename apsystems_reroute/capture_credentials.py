@@ -28,7 +28,7 @@ in the options points the DNAT rules here instead of at your broker, on this
 same host, so nothing has to be moved and the broker does not even have to stop.
 
 This file is a copy of tools/ezhi_mqtt_credentials.py in the integration
-repository (Glenbeulah/EZHI), which is where it is maintained -- people who do
+repository (phiten/EZHI), which is where it is maintained -- people who do
 not run this add-on need it too. Keep the two in step; the selftest below is the
 same one and runs in tests/run_tests.sh.
 

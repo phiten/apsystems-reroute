@@ -1,4 +1,4 @@
-# EZHI Reroute — a Home Assistant add-on
+# APSystems Reroute — a Home Assistant add-on
 
 Local control of an APsystems EZHI inverter, by sending its MQTT connection to a
 broker you run instead of to the vendor's cloud.
@@ -9,24 +9,24 @@ firmware. So the redirect has to happen in your network. This add-on holds the
 is something you add in your router.
 
 Built for use with the
-[apsystems_ezhi_local](https://github.com/kamilkosek/EZHI) integration on its
+[apsystems_ezhi_local](https://github.com/phiten/EZHI) integration on its
 `local_mqtt` control transport.
 
 ## Install
 
 1. Home Assistant → **Settings → Add-ons → Add-on Store**
 2. The three-dot menu → **Repositories** → add
-   `https://github.com/Glenbeulah/ezhi-reroute`
-3. Install **EZHI Reroute**, start it, and read its log — it tells you the exact
+   `https://github.com/phiten/apsystems-reroute`
+3. Install **APSystems Reroute**, start it, and read its log — it tells you the exact
    static route to add in your router.
 4. Turn on the **Watchdog** toggle on the add-on's page.
 
 Your broker also has to *accept* the inverter, and the password it presents is
 held in firmware and printed nowhere. The **`capture_credentials`** option reads
 it off the wire for you, without stopping the broker — see
-[the password your broker has to accept](ezhi_reroute/DOCS.md#the-password-your-broker-has-to-accept).
+[the password your broker has to accept](apsystems_reroute/DOCS.md#the-password-your-broker-has-to-accept).
 
-Full documentation: [`ezhi_reroute/DOCS.md`](ezhi_reroute/DOCS.md). Read the
+Full documentation: [`apsystems_reroute/DOCS.md`](apsystems_reroute/DOCS.md). Read the
 "When this is the wrong mechanism" section before you commit to this approach —
 for some networks a DNS rewrite is the better fit, and the reason is not effort.
 
